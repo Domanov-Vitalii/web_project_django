@@ -15,8 +15,15 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Підключення стандартних URL-адрес для автентифікації (логін/логаут)
+    path('accounts/', include('django.contrib.auth.urls')), # Пункт 4
+    # Підключення URL-адрес для обчислень
+    path('api/v1/', include('calculations.urls')),
+    
+    # Можливо, вам потрібен домашній URL для frontend-сторінки:
+    # path('', views.home, name='home'),
 ]
