@@ -21,12 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-change-me')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']  # У продакшені обмежити до конкретних доменів
 
 
 # Application definition
@@ -60,6 +60,7 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -71,17 +72,17 @@ TEMPLATES = [
 WSGI_APPLICATION = 'web.wsgi.application'
 
 
-# Database
+# Database - PostgreSQL з підтримкою Docker
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'my_heavy_calc_db',
-        'USER': 'postgres',
-        'PASSWORD': '1111',
-        'HOST': 'localhost', 
-        'PORT': '5432',
+        'NAME': os.getenv('DATABASE_NAME', 'my_heavy_calc_db'),
+        'USER': os.getenv('DATABASE_USER', 'postgres'),
+        'PASSWORD': os.getenv('DATABASE_PASSWORD', '1111'),
+        'HOST': os.getenv('DATABASE_HOST', 'localhost'),  # 'db' в Docker
+        'PORT': os.getenv('DATABASE_PORT', '5432'),
     }
 }
 
@@ -104,28 +105,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-TIME_ZONE = 'UTC'
-
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
-
-
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/1' 
-
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-
-CELERY_TASK_TRACK_STARTED = True 
-
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'uk-ua'
 
+TIME_ZONE = 'Europe/Kyiv'
 
 USE_I18N = True
 
@@ -135,7 +120,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -145,12 +131,37 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- CELERY CONFIGURATION (ПУНКТ 5: БАЛАНСУВАННЯ) ---
 
+# Redis як брокер повідомлень для Celery
+REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
+REDIS_PORT = os.getenv('REDIS_PORT', '6379')
 
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0' 
+CELERY_BROKER_URL = f'redis://{REDIS_HOST}:{REDIS_PORT}/0'
+CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/1'
 
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
 
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/1' 
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_RESULT_EXPIRES = 3600  # 1 година
 
+# Налаштування для балансування завдань між воркерами
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Один воркер бере одну задачу за раз
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 50  # Перезапуск після 50 задач (захист від витоків пам'яті)
 
+# --- AUTHENTICATION SETTINGS ---
 
-CELERY_TASK_RESULT_EXPIRES = 3600 # 1 година
+LOGIN_REDIRECT_URL = '/'
+LOGOUT_REDIRECT_URL = '/'
+LOGIN_URL = '/accounts/login/'
+
+# --- SECURITY SETTINGS (для продакшену) ---
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'

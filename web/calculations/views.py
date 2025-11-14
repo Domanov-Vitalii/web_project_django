@@ -1,17 +1,17 @@
-# domanov-vitalii/web_project_django/web_project_django-dev/web/calculations/views.py
-
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.core.validators import DecimalValidator, ValidationError
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from decimal import Decimal
 import json
 
-from celery.app import control
-from web.celery import celery_app
+from web import celery_app
 
 from .models import CalculationTask
-from .tasks import calculate_high_precision_sqrt, MAX_PRECISION # Імпортуємо Celery-завдання
+from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
+
 
 @login_required
 @require_http_methods(["POST"])
@@ -24,7 +24,7 @@ def start_calculation(request):
         
         # --- 1. Валідація Вхідних Даних (Пункт 1) ---
         if precision > MAX_PRECISION:
-             return JsonResponse({
+            return JsonResponse({
                 'error': f"Трудомісткість перевищено. Максимальна точність: {MAX_PRECISION}.",
                 'status': 'REJECTED'
             }, status=400)
@@ -33,8 +33,12 @@ def start_calculation(request):
         try:
             DecimalValidator(max_digits=30, decimal_places=0)(number_str)
             number = Decimal(number_str)
-        except ValidationError:
+        except (ValidationError, TypeError, ValueError):
             return JsonResponse({'error': 'Некоректний формат числа.'}, status=400)
+        
+        # Перевірка, що число невід'ємне
+        if number < 0:
+            return JsonResponse({'error': 'Число повинно бути невід\'ємним.'}, status=400)
         
         # --- 2. Створення запису в БД (Пункт 3) ---
         task_instance = CalculationTask.objects.create(
@@ -76,34 +80,36 @@ def get_task_status(request, task_id):
         'status': task.status,
         'progress_percent': task.progress_percent,
         'result': task.result_data,
-        'created_at': task.created_at,
-        'finished_at': task.finished_at,
-        'number_to_calculate': str(task.number_to_calculate)
+        'created_at': task.created_at.isoformat(),
+        'finished_at': task.finished_at.isoformat() if task.finished_at else None,
+        'number_to_calculate': str(task.number_to_calculate),
+        'precision': task.precision
     })
 
 
 @login_required
 def get_task_history(request):
     """Повертає історію завдань користувача (Пункт 3)."""
-    tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:100] # Обмеження історії
+    tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:100]
     
     history = [{
         'task_id': t.id,
         'status': t.status,
         'progress_percent': t.progress_percent,
         'created_at': t.created_at.isoformat(),
+        'finished_at': t.finished_at.isoformat() if t.finished_at else None,
         'number_to_calculate': str(t.number_to_calculate),
+        'precision': t.precision,
         'result_snippet': (t.result_data[:50] + '...') if t.result_data and len(t.result_data) > 50 else t.result_data
     } for t in tasks]
 
     return JsonResponse({'history': history})
 
+
 @login_required
 @require_http_methods(["POST"])
 def cancel_task(request, task_id):
-    """
-    Скасовує виконання Celery-завдання.
-    """
+    """Скасовує виконання Celery-завдання."""
     
     # 1. Знаходимо завдання в БД і перевіряємо право власності
     task_instance = get_object_or_404(CalculationTask, pk=task_id, user=request.user)
@@ -114,20 +120,19 @@ def cancel_task(request, task_id):
 
     # 2. Перевірка поточного стану
     if task_instance.status in ['SUCCESS', 'FAILURE', 'CANCELED', 'REJECTED']:
-        return JsonResponse({'error': f'Завдання вже у стані: {task_instance.status}. Скасування неможливе.'}, status=400)
+        return JsonResponse({
+            'error': f'Завдання вже у стані: {task_instance.status}. Скасування неможливе.'
+        }, status=400)
     
     # 3. Надсилання сигналу скасування Celery
     try:
-        # celery_app.control.revoke надсилає сигнал до воркерів
-        # terminate=True забезпечує негайне завершення процесу воркера.
-        # signal='SIGKILL' можна використовувати для примусового завершення, але SIGTERM зазвичай достатньо.
         celery_app.control.revoke(
             celery_id, 
             terminate=True, 
             signal='SIGTERM'
         )
 
-        # 4. Оновлення статусу в локальній БД (необхідно для відображення в історії)
+        # 4. Оновлення статусу в локальній БД
         task_instance.status = 'CANCELED'
         task_instance.finished_at = timezone.now()
         task_instance.progress_percent = 0
