@@ -20,11 +20,6 @@ from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
 def home_page(request):
     return render(request, 'home.html')
 
-@login_required
-def my_tasks_page(request):
-    tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:200]
-    return render(request, 'my_tasks.html', {'tasks': tasks})
-
 def login_view(request):
     if request.user.is_authenticated:
         return redirect('home')
@@ -39,7 +34,7 @@ def login_view(request):
     return render(request, 'login.html', {'form': form})
 
 def logout_view(request):
-    if request.method == 'POST':
+    if request.method == 'GET':
         auth_logout(request)
     return redirect('home')
 
@@ -113,6 +108,10 @@ def start_calculation(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
+@login_required
+def my_tasks_page(request):
+    tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:200]
+    return render(request, 'my_tasks.html', {'tasks': tasks})
 
 @login_required
 def get_task_status(request, task_id):
