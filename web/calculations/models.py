@@ -23,7 +23,8 @@ class CalculationTask(models.Model):
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING', verbose_name="Статус")
     progress_percent = models.IntegerField(default=0, verbose_name="Прогрес (%)")
-    
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата Початку")
+
     result_data = models.TextField(null=True, blank=True, verbose_name="Результат")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата Завершення")
 

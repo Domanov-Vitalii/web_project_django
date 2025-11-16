@@ -5,15 +5,11 @@ import time
 
 from .models import CalculationTask 
 
-MAX_PRECISION = 10_000_000 
+MAX_PRECISION = 3_000_000 
 
 @shared_task(bind=True)
 def calculate_high_precision_sqrt(self, task_db_id):
-    """
-    Трудомістке завдання: обчислення кореня з високою точністю.
-    Оновлює стан і результат безпосередньо в моделі CalculationTask.
-    """
-    
+
     try:
         task_instance = CalculationTask.objects.get(pk=task_db_id)
         number = task_instance.number_to_calculate
@@ -28,7 +24,8 @@ def calculate_high_precision_sqrt(self, task_db_id):
 
         task_instance.status = 'RUNNING'
         task_instance.progress_percent = 0
-        task_instance.save(update_fields=['status', 'progress_percent'])
+        task_instance.started_at = timezone.now()
+        task_instance.save(update_fields=['status', 'progress_percent', 'started_at'])
 
         getcontext().prec = precision
         

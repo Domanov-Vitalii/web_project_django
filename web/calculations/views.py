@@ -13,7 +13,8 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from web import celery_app
-
+from heapq import heappop, heappush
+from django.db.models import F
 from django.contrib.admin.views.decorators import staff_member_required
 from .models import CalculationTask
 from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
@@ -78,7 +79,7 @@ def start_calculation(request):
 
         try:
             number = Decimal(number_str)
-            DecimalValidator(max_digits=30, decimal_places=0)(number)
+            DecimalValidator(max_digits=20, decimal_places=0)(number)
         except (ValidationError, TypeError, ValueError):
             return JsonResponse({'error': 'Некоректний формат числа.'}, status=400)
         
@@ -116,8 +117,6 @@ def my_tasks_page(request):
 
 @login_required
 def get_task_status(request, task_id):
-    """Повертає поточний статус завдання (Пункт 2, 3)."""
-    # Перевіряємо, чи належить завдання поточному користувачу
     task = get_object_or_404(CalculationTask, pk=task_id, user=request.user)
     
     return JsonResponse({
@@ -132,20 +131,87 @@ def get_task_status(request, task_id):
     })
 
 
+def _estimate_duration_s(precision):
+    if precision <= 50_000: return 1
+    if precision <= 200_000: return 2
+    if precision <= 600_000: return 6
+    if precision <= 1_000_000: return 15
+    if precision <= 2_000_000: return 35
+    return 50 
+
+def _pending_eta_map():
+    now = timezone.now()
+
+    capacity = 0
+    remaining_heap = []
+    try:
+        inspector = celery_app.control.inspect(timeout=1)
+        stats_map = inspector.stats() or {}
+        active_map = inspector.active() or {}
+        # capacity
+        for st in (stats_map or {}).values():
+            pool = (st or {}).get("pool") or {}
+            if isinstance(pool.get("processes"), list):
+                capacity += len(pool["processes"])
+            elif isinstance(pool.get("max-concurrency"), int):
+                capacity += pool["max-concurrency"]
+        capacity = max(capacity, 1) 
+
+        for tasks in (active_map or {}).values():
+            for t in (tasks or []):
+                cid = t.get('id')
+                if not cid:
+                    continue
+                try:
+                    dbt = CalculationTask.objects.get(celery_task_id=cid)
+                    prec = int(dbt.precision)
+                    dur = _estimate_duration_s(prec)
+                    started = dbt.started_at or dbt.created_at
+                    elapsed = max((now - started).total_seconds(), 0)
+                    rem = max(dur - int(elapsed), 0)
+                except CalculationTask.DoesNotExist:
+                    rem = 5
+                remaining_heap.append(rem)
+    except Exception:
+        capacity = max(capacity, 1)
+
+    if len(remaining_heap) < capacity:
+        remaining_heap.extend([0] * (capacity - len(remaining_heap)))
+    remaining_heap = sorted(remaining_heap)[:capacity]
+
+    pending_qs = (CalculationTask.objects
+                  .filter(status='PENDING')
+                  .order_by('created_at')
+                  .only('id', 'precision', 'created_at'))
+    heap = remaining_heap[:] if remaining_heap else [0] * capacity
+    eta_map = {}
+    for t in pending_qs.iterator():
+        d = _estimate_duration_s(int(t.precision))
+        start_in = heappop(heap)   
+        eta_map[t.id] = int(start_in)
+        heappush(heap, start_in + d) 
+
+    return eta_map
+
+
 @login_required
 def get_task_history(request):
+    eta_map = _pending_eta_map()
+
     tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:100]
-    
+
     data = [{
         'id': t.id,
         'status': t.status,
-        'status_display': t.get_status_display(), 
+        'status_display': t.get_status_display(),
         'progress_percent': t.progress_percent,
         'created_at': t.created_at.isoformat(),
         'finished_at': t.finished_at.isoformat() if t.finished_at else None,
         'number_to_calculate': str(t.number_to_calculate),
         'precision': t.precision,
-        'result_data': t.result_data
+        'result_data': t.result_data,
+        # НОВЕ поле (тільки для PENDING)
+        'eta_start_seconds': (eta_map.get(t.id) if t.status == 'PENDING' else None),
     } for t in tasks]
 
     return JsonResponse(data, safe=False)

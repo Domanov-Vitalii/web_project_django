@@ -107,7 +107,13 @@ async function refresh(){
       statusCell.textContent = task.status_display; 
       statusCell.className = `status-${task.status}`;
 
-      row.cells[4].textContent = `${task.progress_percent}%`;
+      if (task.status === 'PENDING' && typeof task.eta_start_seconds === 'number') {
+        const wait = Math.max(0, task.eta_start_seconds|0);
+        const mins = Math.floor(wait/60), secs = wait%60;
+        row.cells[4].textContent = `Очікування ~ ${mins}хв ${secs}с`;
+      } else {
+        row.cells[4].textContent = `${task.progress_percent}%`;
+      }
       
       const resultCell = row.cells[5];
       if (task.result_data) {
