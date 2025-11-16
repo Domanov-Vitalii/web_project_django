@@ -2,45 +2,93 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.core.validators import DecimalValidator, ValidationError
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render, redirect
 from django.utils import timezone
 from decimal import Decimal
 import json
-
+from django.conf import settings
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib import messages
+from django.contrib.auth import login as auth_login
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth import login as auth_login, logout as auth_logout
 from web import celery_app
 
 from .models import CalculationTask
 from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
 
+def home_page(request):
+    return render(request, 'home.html')
+
+@login_required
+def my_tasks_page(request):
+    tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:200]
+    return render(request, 'my_tasks.html', {'tasks': tasks})
+
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('home')
+    if request.method == 'POST':
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            user = form.get_user()
+            auth_login(request, user)
+            return redirect('home')
+    else:
+        form = AuthenticationForm(request)
+    return render(request, 'login.html', {'form': form})
+
+def logout_view(request):
+    if request.method == 'POST':
+        auth_logout(request)
+    return redirect('home')
+
+def signup(request):
+    if request.user.is_authenticated:
+        return redirect('home')
+    if request.method == 'POST':
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            messages.success(request, 'Акаунт створено, увійдіть.')
+            auth_login(request, user)
+            return redirect('home')
+    else:
+        form = UserCreationForm()
+    return render(request, 'signup.html', {'form': form})
 
 @login_required
 @require_http_methods(["POST"])
 def start_calculation(request):
-    """Приймає запит, валідує, створює запис у БД та запускає Celery Task."""
     try:
         data = json.loads(request.body)
         number_str = data.get('number')
         precision = int(data.get('precision', 50000))
         
-        # --- 1. Валідація Вхідних Даних (Пункт 1) ---
+        active = CalculationTask.objects.filter(
+            user=request.user, status__in=['PENDING', 'RUNNING']
+        ).count()
+        if active >= settings.MAX_ACTIVE_TASKS_PER_USER:
+            return JsonResponse({
+                'error': f'Перевищено ліміт активних задач ({settings.MAX_ACTIVE_TASKS_PER_USER}). Завершіть або скасуйте поточні.'
+            }, status=429)
+
+
         if precision > MAX_PRECISION:
             return JsonResponse({
                 'error': f"Трудомісткість перевищено. Максимальна точність: {MAX_PRECISION}.",
                 'status': 'REJECTED'
             }, status=400)
 
-        # Валідація числа (для безпеки)
         try:
-            DecimalValidator(max_digits=30, decimal_places=0)(number_str)
             number = Decimal(number_str)
+            DecimalValidator(max_digits=30, decimal_places=0)(number)
         except (ValidationError, TypeError, ValueError):
             return JsonResponse({'error': 'Некоректний формат числа.'}, status=400)
         
-        # Перевірка, що число невід'ємне
         if number < 0:
             return JsonResponse({'error': 'Число повинно бути невід\'ємним.'}, status=400)
         
-        # --- 2. Створення запису в БД (Пункт 3) ---
         task_instance = CalculationTask.objects.create(
             user=request.user,
             number_to_calculate=number,
@@ -48,8 +96,6 @@ def start_calculation(request):
             status='PENDING'
         )
 
-        # --- 3. Запуск Celery-завдання (Балансування) ---
-        # Передаємо ID об'єкта моделі, щоб Celery Worker міг його оновлювати
         task = calculate_high_precision_sqrt.delay(task_instance.id)
         
         # Зберігаємо Celery ID у моделі для моніторингу/скасування
@@ -89,42 +135,38 @@ def get_task_status(request, task_id):
 
 @login_required
 def get_task_history(request):
-    """Повертає історію завдань користувача (Пункт 3)."""
     tasks = CalculationTask.objects.filter(user=request.user).order_by('-created_at')[:100]
     
-    history = [{
-        'task_id': t.id,
+    data = [{
+        'id': t.id,
         'status': t.status,
+        'status_display': t.get_status_display(), 
         'progress_percent': t.progress_percent,
         'created_at': t.created_at.isoformat(),
         'finished_at': t.finished_at.isoformat() if t.finished_at else None,
         'number_to_calculate': str(t.number_to_calculate),
         'precision': t.precision,
-        'result_snippet': (t.result_data[:50] + '...') if t.result_data and len(t.result_data) > 50 else t.result_data
+        'result_data': t.result_data
     } for t in tasks]
 
-    return JsonResponse({'history': history})
+    return JsonResponse(data, safe=False)
 
 
 @login_required
 @require_http_methods(["POST"])
 def cancel_task(request, task_id):
-    """Скасовує виконання Celery-завдання."""
     
-    # 1. Знаходимо завдання в БД і перевіряємо право власності
     task_instance = get_object_or_404(CalculationTask, pk=task_id, user=request.user)
     celery_id = task_instance.celery_task_id
     
     if not celery_id:
         return JsonResponse({'error': 'Завдання не було запущено в Celery.'}, status=400)
 
-    # 2. Перевірка поточного стану
     if task_instance.status in ['SUCCESS', 'FAILURE', 'CANCELED', 'REJECTED']:
         return JsonResponse({
             'error': f'Завдання вже у стані: {task_instance.status}. Скасування неможливе.'
         }, status=400)
     
-    # 3. Надсилання сигналу скасування Celery
     try:
         celery_app.control.revoke(
             celery_id, 
@@ -132,7 +174,6 @@ def cancel_task(request, task_id):
             signal='SIGTERM'
         )
 
-        # 4. Оновлення статусу в локальній БД
         task_instance.status = 'CANCELED'
         task_instance.finished_at = timezone.now()
         task_instance.progress_percent = 0
@@ -144,7 +185,7 @@ def cancel_task(request, task_id):
         return JsonResponse({
             'task_id': task_id,
             'status': 'CANCELED',
-            'message': 'Завдання успішно скасовано.'
+            'message': 'CANCELED'
         })
 
     except Exception as e:

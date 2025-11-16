@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key-change-me')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
+DEBUG = True
 
 ALLOWED_HOSTS = ['*']  # У продакшені обмежити до конкретних доменів
 
@@ -56,7 +56,7 @@ ROOT_URLCONF = 'web.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -154,7 +154,7 @@ CELERY_WORKER_MAX_TASKS_PER_CHILD = 50  # Перезапуск після 50 з�
 
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'
-LOGIN_URL = '/accounts/login/'
+LOGIN_URL = 'login'
 
 # --- SECURITY SETTINGS (для продакшену) ---
 
@@ -165,3 +165,12 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
+
+MAX_ACTIVE_TASKS_PER_USER = int(os.getenv('MAX_ACTIVE_TASKS_PER_USER', '3'))
+ALLOWED_HOSTS = ['*']  # У продакшені обмежити до конкретних доменів
+
+# Додайте цей рядок, щоб Django довіряв HTTPS-запитам з localhost
+CSRF_TRUSTED_ORIGINS = ['https://localhost']
+# Celery time limits (секунди) — захист від надто довгих задач
+CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv('CELERY_TASK_SOFT_TIME_LIMIT', '540'))  # 9 хв
+CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '600'))  # 10 хв

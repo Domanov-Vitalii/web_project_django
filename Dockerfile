@@ -12,11 +12,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Копіюємо файл requirements.txt для встановлення залежностей
-# Вам потрібно створити цей файл, перелічивши django, celery, redis, psycopg2-binary, gunicorn, python-decouple
 COPY requirements.txt .
-
-# Встановлюємо залежності
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копіюємо весь код застосунку

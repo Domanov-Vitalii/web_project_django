@@ -16,14 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from calculations import views as calc_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Підключення стандартних URL-адрес для автентифікації (логін/логаут)
-    path('accounts/', include('django.contrib.auth.urls')), # Пункт 4
-    # Підключення URL-адрес для обчислень
+    path('signup/', calc_views.signup, name='signup'),
+    path('login/', calc_views.login_view, name='login'),
+    path('logout/', calc_views.logout_view, name='logout'),
+    path('', calc_views.home_page, name='home'),
+    path('my-tasks/', calc_views.my_tasks_page, name='my_tasks'),
     path('api/v1/', include('calculations.urls')),
-    
-    # Можливо, вам потрібен домашній URL для frontend-сторінки:
-    # path('', views.home, name='home'),
 ]

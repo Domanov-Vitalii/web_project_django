@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Мої задачі{% endblock %}
+{% block content %}
+<h2>Мої задачі</h2>
+<p><a href="{% url 'home' %}">← Назад</a></p>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Число</th>
+      <th>Точність</th>
+      <th>Статус</th>
+      <th>Прогрес</th>
+      <th>Результат (фрагмент)</th>
+      <th>Дія</th>
+    </tr>
+  </thead>
+  <tbody id="tasksBody">
+    {% for t in tasks %}
+      <tr id="row-{{ t.id }}">
+        <td>{{ t.id }}</td>
+        <td>{{ t.number_to_calculate }}</td>
+        <td>{{ t.precision }}</td>
+        <td class="status-{{ t.status }}">{{ t.get_status_display }}</td>
+        <td>{{ t.progress_percent }}%</td>
+        <td>
+          {% if t.result_data %}
+            {{ t.result_data|slice:":40" }}{% if t.result_data|length > 40 %}...{% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if t.status == 'RUNNING' or t.status == 'PENDING' %}
+            <button data-id="{{ t.id }}" class="cancel-btn">Скасувати</button>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7">Поки що немає задач.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+function getCookie(name){
+  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return m ? m.pop() : '';
+}
+async function cancelTask(id){
+  const csrf = getCookie('csrftoken');
+  const btn = document.querySelector('button.cancel-btn[data-id="'+id+'"]');
+  if(btn){ btn.disabled = true; btn.textContent='...' }
+  try{
+    const r = await fetch('/api/v1/tasks/'+id+'/cancel/', {
+      method:'POST',
+      headers:{'X-CSRFToken': csrf}
+    });
+    const data = await r.json();
+    if(r.ok){
+      const row = document.getElementById('row-'+id);
+      if(row){
+        row.querySelector('td.status-CANCELED, td:nth-child(4)').textContent='Скасовано';
+        row.querySelector('td:nth-child(5)').textContent='0%';
+        if(btn){ btn.remove(); }
+      }
+    } else {
+      alert('Помилка: '+ (data.error||r.status));
+      if(btn){ btn.disabled=false; btn.textContent='Скасувати'; }
+    }
+  }catch(e){
+    alert('Помилка мережі');
+    if(btn){ btn.disabled=false; btn.textContent='Скасувати'; }
+  }
+}
+document.addEventListener('click', (e)=>{
+  if(e.target.classList.contains('cancel-btn')){
+    const id = e.target.getAttribute('data-id');
+    cancelTask(id);
+  }
+});
+
+async function refresh(){
+  try {
+    const r = await fetch('/api/v1/tasks/history/');
+    if (!r.ok) return;
+    const data = await r.json();
+    const tasksBody = document.getElementById('tasksBody');
+    
+    data.forEach(task => {
+      let row = document.getElementById(`row-${task.id}`);
+      if (!row) {
+        row = tasksBody.insertRow(0);
+        row.id = `row-${task.id}`;
+        row.innerHTML = `
+          <td>${task.id}</td>
+          <td>${task.number_to_calculate}</td>
+          <td>${task.precision}</td>
+          <td class="status-${task.status}"></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        `;
+      }
+      
+      const statusCell = row.cells[3];
+      statusCell.textContent = task.status_display; 
+      statusCell.className = `status-${task.status}`;
+
+      row.cells[4].textContent = `${task.progress_percent}%`;
+      
+      const resultCell = row.cells[5];
+      if (task.result_data) {
+        resultCell.textContent = task.result_data.length > 40 ? task.result_data.slice(0, 40) + '...' : task.result_data;
+      } else if (task.status === 'CANCELED') {
+        resultCell.textContent = 'Виконання скасовано користувачем.';
+      } else {
+        resultCell.textContent = '—';
+      }
+
+      const actionCell = row.cells[6];
+      if (task.status === 'PENDING' || task.status === 'RUNNING') {
+        if (!actionCell.querySelector('button')) {
+            actionCell.innerHTML = `<button class="cancel-btn" data-id="${task.id}">Скасувати</button>`;
+        }
+      } else {
+        actionCell.innerHTML = '—';
+      }
+    });
+
+  } catch (e) {
+    console.error('Refresh error:', e);
+  }
+}
+setInterval(refresh, 5000);
+</script>
+{% endblock %}

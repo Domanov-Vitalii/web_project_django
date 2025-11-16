@@ -1,25 +1,23 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
   db:
     image: postgres:15-alpine
     container_name: web_postgres
     environment:
+      POSTGRES_PASSWORD: 1111
       POSTGRES_DB: my_heavy_calc_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1111
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U postgres -d my_heavy_calc_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
-  # Redis (Celery Broker & Result Backend)
   redis:
     image: redis:7-alpine
     container_name: web_redis
@@ -27,36 +25,36 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 30
 
-  # Django Application
   web:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: web_django
-    command: >
-      bash -c "python manage.py migrate &&
-               python manage.py collectstatic --noinput &&
-               gunicorn web.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    working_dir: /app
     volumes:
       - ./web:/app
       - static_volume:/app/staticfiles
+    environment:
+      DJANGO_SETTINGS_MODULE: web.settings
+      DEBUG: "1"
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: my_heavy_calc_db
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: 1111
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: >
+      bash -c "python manage.py makemigrations &&
+               python manage.py migrate &&
+               python manage.py collectstatic --noinput &&
+               gunicorn web.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     ports:
       - "8000:8000"
-    environment:
-      - DJANGO_SETTINGS_MODULE=web.settings
-      - SECRET_KEY=django-insecure-your-secret-key-here-change-in-production
-      - DEBUG=True
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=my_heavy_calc_db
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=1111
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
     depends_on:
       db:
         condition: service_healthy
@@ -64,69 +62,74 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Celery Worker 1
+  nginx:
+    image: nginx:1.29.3-alpine
+    container_name: web_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - static_volume:/app/staticfiles:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
   celery_worker_1:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: celery_worker_1
-    command: celery -A web worker --loglevel=info --concurrency=2 --hostname=worker1@%h
+    working_dir: /app
     volumes:
       - ./web:/app
     environment:
-      - DJANGO_SETTINGS_MODULE=web.settings
-      - SECRET_KEY=django-insecure-your-secret-key-here-change-in-production
-      - DEBUG=True
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=my_heavy_calc_db
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=1111
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      DJANGO_SETTINGS_MODULE: web.settings
+      DEBUG: "1"
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: my_heavy_calc_db
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: 1111
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: celery -A web.celery worker --loglevel=info --concurrency=2 --hostname=worker1@%h -Q root_calc
     depends_on:
-      - db
-      - redis
-      - web
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
     restart: unless-stopped
 
-  # Celery Worker 2
   celery_worker_2:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: celery_worker_2
-    command: celery -A web worker --loglevel=info --concurrency=2 --hostname=worker2@%h
+    working_dir: /app
     volumes:
       - ./web:/app
     environment:
-      - DJANGO_SETTINGS_MODULE=web.settings
-      - SECRET_KEY=django-insecure-your-secret-key-here-change-in-production
-      - DEBUG=True
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=my_heavy_calc_db
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=1111
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      DJANGO_SETTINGS_MODULE: web.settings
+      DEBUG: "1"
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: my_heavy_calc_db
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: 1111
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: celery -A web.celery worker --loglevel=info --concurrency=2 --hostname=worker2@%h -Q root_calc
     depends_on:
-      - db
-      - redis
-      - web
-    restart: unless-stopped
-
-  # Nginx Load Balancer (для балансування, якщо буде кілька Django інстансів)
-  nginx:
-    image: nginx:alpine
-    container_name: web_nginx
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - static_volume:/app/staticfiles:ro
-    depends_on:
-      - web
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

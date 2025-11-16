@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Головна{% endblock %}
+{% block content %}
+{% if not user.is_authenticated %}
+  <div class="center-box">
+    Хочеш корінь рахувати?<br>
+    <span style="font-size:22px;">Не забудь залогуватись!</span><br><br>
+  </div>
+{% else %}
+  <h2>Запуск нової задачі</h2>
+  <form id="startTaskForm">
+    <div class="flex">
+      <div>
+        <label>Число:</label><br>
+        <input type="text" name="number" id="number" placeholder="123456789" required>
+      </div>
+      <div>
+        <label>Точність (цифр):</label><br>
+        <input type="number" name="precision" id="precision" value="50000" min="1" required>
+      </div>
+      <div style="align-self:flex-end;">
+        <button type="submit">Запустити</button>
+      </div>
+    </div>
+  </form>
+  <p><a href="{% url 'my_tasks' %}">Переглянути мої задачі →</a></p>
+  <div id="taskResult" style="margin-top:20px;"></div>
+
+  <script>
+    function getCookie(name){
+      const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+      return m ? m.pop() : '';
+    }
+    document.getElementById('startTaskForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const number = document.getElementById('number').value.trim();
+      const precision = parseInt(document.getElementById('precision').value, 10);
+      const csrf = getCookie('csrftoken');
+      const resBox = document.getElementById('taskResult');
+      resBox.textContent = 'Відправка...';
+      try {
+        const r = await fetch('/api/v1/tasks/start/', {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json',
+            'X-CSRFToken': csrf
+          },
+            body: JSON.stringify({number, precision})
+        });
+        const data = await r.json();
+        if(!r.ok){
+          resBox.innerHTML = '<span style="color:#ff5b5b;">Помилка: '+ (data.error || r.status) + '</span>';
+        } else {
+          resBox.innerHTML = 'Задача прийнята. ID: '+data.task_id+
+            ' | <a href="/my-tasks/">Перейти до списку</a>';
+        }
+      } catch(err){
+        resBox.innerHTML = '<span style="color:#ff5b5b;">Помилка мережі</span>';
+      }
+    });
+  </script>
+{% endif %}
+{% endblock %}
