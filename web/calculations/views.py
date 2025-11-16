@@ -98,7 +98,6 @@ def start_calculation(request):
 
         task = calculate_high_precision_sqrt.delay(task_instance.id)
         
-        # Зберігаємо Celery ID у моделі для моніторингу/скасування
         task_instance.celery_task_id = task.id
         task_instance.save(update_fields=['celery_task_id'])
 
