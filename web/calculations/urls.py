@@ -6,4 +6,5 @@ urlpatterns = [
     path('tasks/history/', views.get_task_history, name='get_task_history'),
     path('tasks/<int:task_id>/status/', views.get_task_status, name='get_task_status'),
     path('tasks/<int:task_id>/cancel/', views.cancel_task, name='cancel_task'),
+    path('tasks/active/', views.get_active_celery_tasks, name='get_active_celery_tasks'),
 ]

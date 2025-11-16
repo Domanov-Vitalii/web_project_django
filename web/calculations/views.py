@@ -14,6 +14,7 @@ from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from web import celery_app
 
+from django.contrib.admin.views.decorators import staff_member_required
 from .models import CalculationTask
 from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
 
@@ -188,3 +189,17 @@ def cancel_task(request, task_id):
 
     except Exception as e:
         return JsonResponse({'error': f'Помилка скасування: {str(e)}'}, status=500)
+    
+
+@staff_member_required
+def get_active_celery_tasks(request):
+    try:
+        inspector = celery_app.control.inspect(timeout=1)
+        active = inspector.active() or {}
+        # Формат: worker -> list(task_id)
+        workers = {}
+        for w, tasks in active.items():
+            workers[w] = [t.get('id') for t in tasks if t.get('id')]
+        return JsonResponse({'workers': workers, 'ts': timezone.now().isoformat()})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

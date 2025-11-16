@@ -1,0 +1,35 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Celery Workers{% endblock %}
+
+{% block content %}
+<h1>Celery Workers</h1>
+<p><small>Оновлення кожні 0.5 с. Час: <span id="ts">—</span></small></p>
+<div id="monitoring-content">Завантаження...</div>
+
+<script>
+async function fetchWorkerStatus() {
+  const box = document.getElementById('monitoring-content');
+  try {
+    const resp = await fetch("{% url 'get_active_celery_tasks' %}");
+    if (!resp.ok) { box.textContent = 'Помилка'; return; }
+    const data = await resp.json();
+    document.getElementById('ts').textContent = data.ts?.replace('T',' ').split('.')[0] || '—';
+    const workers = data.workers || {};
+    const names = Object.keys(workers).sort();
+    if (!names.length){ box.innerHTML = '<p>Немає активних воркерів.</p>'; return; }
+    let html = '<ul style="list-style:none;padding-left:0">';
+    names.forEach(w=>{
+      const tasks = workers[w];
+      const t = tasks.length ? tasks.map(id=>`<code>${id}</code>`).join(', ') : '<em>немає активних задач</em>';
+      html += `<li style="margin:6px 0;"><strong>${w}</strong>: ${t}</li>`;
+    });
+    html += '</ul>';
+    box.innerHTML = html;
+  } catch(e){
+    box.textContent = 'Помилка мережі';
+  }
+}
+setInterval(fetchWorkerStatus, 500);
+document.addEventListener('DOMContentLoaded', fetchWorkerStatus);
+</script>
+{% endblock %}

@@ -43,6 +43,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -123,6 +124,8 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -149,7 +152,7 @@ CELERY_TASK_RESULT_EXPIRES = 3600  # 1 година
 # Налаштування для балансування завдань між воркерами
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Один воркер бере одну задачу за раз
 CELERY_WORKER_MAX_TASKS_PER_CHILD = 50  # Перезапуск після 50 задач (захист від витоків пам'яті)
-
+CELERY_TASK_ACKS_LATE = True  
 # --- AUTHENTICATION SETTINGS ---
 
 LOGIN_REDIRECT_URL = '/'
