@@ -93,7 +93,7 @@ services:
       DATABASE_PASSWORD: 1111
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    command: celery -A web.celery worker --loglevel=info --concurrency=1 --hostname=worker1@%h -Q root_calc
+    command: celery -A web.celery worker --loglevel=info --concurrency=1 --hostname=worker1 -Q root_calc
     depends_on:
       db:
         condition: service_healthy
@@ -121,7 +121,7 @@ services:
       DATABASE_PASSWORD: 1111
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    command: celery -A web.celery worker --loglevel=info --concurrency=1 --hostname=worker2@%h -Q root_calc
+    command: celery -A web.celery worker --loglevel=info --concurrency=1 --hostname=worker2 -Q root_calc
     depends_on:
       db:
         condition: service_healthy

@@ -2,6 +2,7 @@
 {% block title %}Реєстрація{% endblock %}
 {% block content %}
 <h2>Створити акаунт</h2>
+<p><small>Ім’я та прізвище — необов’язково. Email обов’язковий.</small></p>
 <form method="post">
   {% csrf_token %}
   {{ form.as_p }}

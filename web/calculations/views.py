@@ -10,7 +10,7 @@ from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib import messages
 from django.contrib.auth import login as auth_login
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import login as auth_login, logout as auth_logout
 from web import celery_app
 from heapq import heappop, heappush
@@ -18,6 +18,7 @@ from django.db.models import F
 from django.contrib.admin.views.decorators import staff_member_required
 from .models import CalculationTask
 from .tasks import calculate_high_precision_sqrt, MAX_PRECISION
+from .forms import CustomUserCreationForm
 
 def home_page(request):
     return render(request, 'home.html')
@@ -44,14 +45,14 @@ def signup(request):
     if request.user.is_authenticated:
         return redirect('home')
     if request.method == 'POST':
-        form = UserCreationForm(request.POST)
+        form = CustomUserCreationForm(request.POST)
         if form.is_valid():
             user = form.save()
-            messages.success(request, 'Акаунт створено, увійдіть.')
+            messages.success(request, 'Акаунт створено.')
             auth_login(request, user)
             return redirect('home')
     else:
-        form = UserCreationForm()
+        form = CustomUserCreationForm()
     return render(request, 'signup.html', {'form': form})
 
 @login_required
@@ -262,10 +263,16 @@ def get_active_celery_tasks(request):
     try:
         inspector = celery_app.control.inspect(timeout=1)
         active = inspector.active() or {}
-        # Формат: worker -> list(task_id)
         workers = {}
-        for w, tasks in active.items():
-            workers[w] = [t.get('id') for t in tasks if t.get('id')]
+        for w, tasks in (active.items() if active else []):
+            lst = []
+            for t in tasks or []:
+                cid = t.get('id')
+                if not cid:
+                    continue
+                db_id = CalculationTask.objects.filter(celery_task_id=cid).values_list('id', flat=True).first()
+                lst.append({'db_id': db_id, 'celery_id': cid})
+            workers[w] = lst  
         return JsonResponse({'workers': workers, 'ts': timezone.now().isoformat()})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
